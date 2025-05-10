@@ -1,5 +1,7 @@
 mod storage;
+use storage::btree::BTree;
 
 fn main() {
-    println!("Hello, world!");
+    let mut btree = BTree::new("./data/store.db");
+    println!("success.")
 }
