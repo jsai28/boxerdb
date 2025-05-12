@@ -6,11 +6,11 @@ const BTREE_MAX_VAL_SIZE: u16 = 3000;
 const BNODE_INTERNAL: u8 = 0;
 const BNODE_LEAF: u8 = 1;
 
-#[derive(Clone, PartialEq)]
-struct Node {
-    keys: Vec<Vec<u8>>,
-    children: Vec<Node>,
-    values: Vec<Vec<u8>>,
+#[derive(Clone, PartialEq, Debug)]
+pub struct Node {
+    pub keys: Vec<Vec<u8>>,
+    pub children: Vec<Node>,
+    pub values: Vec<Vec<u8>>,
 }
 
 pub struct BTree {
@@ -58,7 +58,7 @@ impl BTree {
 // Encode the keys, values, and children of a node + metadata
 // Node = node_type (u8) + num_of_keys (u16) + pointers (u64) + offsets (u16) + KV pairs (4000 bytes) + unused space
 // KV pairs = key_len (u16) + val_len (u16) + key bytes + val bytes
-fn encode_node(node: &Node) -> Vec<u8> {
+pub fn encode_node(node: &Node) -> Vec<u8> {
     let mut buf = vec![0u8; BTREE_PAGE_SIZE as usize];
     let mut node_type = BNODE_LEAF;
     if !node.children.is_empty() {
@@ -101,7 +101,7 @@ fn encode_node(node: &Node) -> Vec<u8> {
     buf
 }
 
-fn decode_node(buf: Vec<u8>) -> Node {
+pub fn decode_node(buf: Vec<u8>) -> Node {
     let node_type = buf[0];
     let is_leaf = node_type == BNODE_LEAF;
 
