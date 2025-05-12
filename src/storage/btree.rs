@@ -9,7 +9,7 @@ const BNODE_LEAF: u8 = 1;
 #[derive(Clone, PartialEq, Debug)]
 pub struct Node {
     pub keys: Vec<Vec<u8>>,
-    pub children: Vec<Node>,
+    pub children: Vec<u64>,
     pub values: Vec<Vec<u8>>,
 }
 
@@ -70,11 +70,25 @@ pub fn encode_node(node: &Node) -> Vec<u8> {
     buf[1..3].copy_from_slice(&num_keys.to_le_bytes());
 
     let mut cursor = 3;
+    if node_type == BNODE_INTERNAL {
+        // encode child pointers
+        assert_eq!(node.children.len(), node.keys.len() + 1);
+
+        for child_ptr in &node.children {
+            let ptr_bytes = child_ptr.to_le_bytes();
+            buf[cursor..cursor + 8].copy_from_slice(&ptr_bytes);
+            cursor += 8;
+        }
+    }
     let offsets_start = cursor;
     cursor += (num_keys as usize) * 2;
     for i in 0..num_keys as usize {
         let key = &node.keys[i];
-        let val = &node.values[i];
+        let val = if node_type == BNODE_LEAF {
+            &node.values[i]
+        } else {
+            &[] as &[u8]
+        };
         let key_len = key.len() as u16;
         let val_len = val.len() as u16;
 
@@ -108,11 +122,23 @@ pub fn decode_node(buf: Vec<u8>) -> Node {
     let num_keys = u16::from_le_bytes([buf[1],buf[2]]) as usize;
 
     let mut keys = Vec::with_capacity(num_keys);
-    let mut values = Vec::with_capacity(num_keys+1);
+    let mut values = Vec::with_capacity(num_keys);
+    let mut children = Vec::with_capacity(num_keys+1);
+
+    let mut cursor = 3;
+    if !is_leaf {
+        for i in 0..num_keys+1 {
+            let start = 3+i*8;
+            let end = start+8;
+            let child = u64::from_le_bytes(buf[start..end].try_into().unwrap());
+            children.push(child);
+        }
+        cursor += (num_keys + 1) * 8;
+    }
 
     let mut offsets = Vec::with_capacity(num_keys);
     for i in 0..num_keys {
-        let start = 3+i*2;
+        let start = cursor+i*2;
         let offset = u16::from_le_bytes([buf[start],buf[start+1]]);
         offsets.push(offset);
     }
@@ -131,12 +157,12 @@ pub fn decode_node(buf: Vec<u8>) -> Node {
         let val = buf[val_start..val_end].to_vec();
 
         keys.push(key);
-        values.push(val);
+
+        if is_leaf {
+            let val = buf[val_start..val_end].to_vec();
+            values.push(val);
+        }
     }
 
-    if !is_leaf {
-        todo!("decode internal node children pointers")
-    }
-
-    Node { keys, children: vec![], values }
+    Node { keys, children, values }
 }
