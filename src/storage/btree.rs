@@ -1,4 +1,4 @@
-use std::io::{Read, Seek, Write};
+use std::io::{Read, Seek, SeekFrom, Write};
 
 const BTREE_PAGE_SIZE: u16 = 4096;
 const BTREE_MAX_KEY_SIZE: u16 = 1000;
@@ -10,7 +10,7 @@ const BNODE_LEAF: u8 = 1;
 struct Node {
     keys: Vec<Vec<u8>>,
     children: Vec<Node>,
-    value: Vec<Vec<u8>>,
+    values: Vec<Vec<u8>>,
 }
 
 pub struct BTree {
@@ -19,6 +19,9 @@ pub struct BTree {
 
 impl BTree {
     pub fn new(path: &str) -> std::io::Result<Self> {
+        let dir = std::path::Path::new(path).parent().unwrap();
+        std::fs::create_dir_all(dir)?;
+
         let mut file = std::fs::OpenOptions::new()
             .read(true)
             .write(true)
@@ -30,7 +33,7 @@ impl BTree {
             // file is empty
             let root = Node {
                 keys: vec![],
-                value: vec![],
+                values: vec![],
                 children: vec![],
             };
 
@@ -39,8 +42,15 @@ impl BTree {
             file.sync_all()?;
             Ok(Self { root })
         } else {
-            // file has root node
-            todo!("decode root node into memory")
+            // decode root node
+            let mut buf = vec![0u8; BTREE_PAGE_SIZE as usize];
+
+            file.seek(SeekFrom::Start(0))?;
+            file.read_exact(&mut buf)?;
+
+            let root = decode_node(buf);
+
+            Ok(Self { root })
         }
     }
 }
@@ -64,7 +74,7 @@ fn encode_node(node: &Node) -> Vec<u8> {
     cursor += (num_keys as usize) * 2;
     for i in 0..num_keys as usize {
         let key = &node.keys[i];
-        let val = &node.value[i];
+        let val = &node.values[i];
         let key_len = key.len() as u16;
         let val_len = val.len() as u16;
 
@@ -91,6 +101,42 @@ fn encode_node(node: &Node) -> Vec<u8> {
     buf
 }
 
-fn decode_node(node: Vec<u8>) -> Node {
-    todo!("decode the bytes into a node for memory")
+fn decode_node(buf: Vec<u8>) -> Node {
+    let node_type = buf[0];
+    let is_leaf = node_type == BNODE_LEAF;
+
+    let num_keys = u16::from_le_bytes([buf[1],buf[2]]) as usize;
+
+    let mut keys = Vec::with_capacity(num_keys);
+    let mut values = Vec::with_capacity(num_keys+1);
+
+    let mut offsets = Vec::with_capacity(num_keys);
+    for i in 0..num_keys {
+        let start = 3+i*2;
+        let offset = u16::from_le_bytes([buf[start],buf[start+1]]);
+        offsets.push(offset);
+    }
+
+    for offset in offsets {
+        let offset = offset as usize;
+        let key_len = u16::from_le_bytes([buf[offset],buf[offset+1]]) as usize;
+        let val_len = u16::from_le_bytes([buf[offset+2],buf[offset+3]]) as usize;
+
+        let key_start = offset+ 4;
+        let key_end = key_start+key_len;
+        let val_start = key_end;
+        let val_end = val_start+val_len;
+
+        let key = buf[key_start..key_end].to_vec();
+        let val = buf[val_start..val_end].to_vec();
+
+        keys.push(key);
+        values.push(val);
+    }
+
+    if !is_leaf {
+        todo!("decode internal node children pointers")
+    }
+
+    Node { keys, children: vec![], values }
 }
