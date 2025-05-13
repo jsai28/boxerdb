@@ -1,3 +1,4 @@
+use std::fs::File;
 use std::io::{Read, Seek, SeekFrom, Write};
 
 const BTREE_PAGE_SIZE: u16 = 4096;
@@ -15,6 +16,7 @@ pub struct Node {
 
 pub struct BTree {
     root: Node,
+    file: File,
 }
 
 impl BTree {
@@ -40,7 +42,7 @@ impl BTree {
             let encoded_root = encode_node(&root);
             file.write_all(&encoded_root)?;
             file.sync_all()?;
-            Ok(Self { root })
+            Ok(Self { root, file })
         } else {
             // decode root node
             let mut buf = vec![0u8; BTREE_PAGE_SIZE as usize];
@@ -50,8 +52,32 @@ impl BTree {
 
             let root = decode_node(buf);
 
-            Ok(Self { root })
+            Ok(Self { root, file })
         }
+    }
+
+    pub fn insert(&mut self, key: Vec<u8>, value: Vec<u8>) {
+        self._insert(&mut self.root, &key, &value, 0);
+    }
+
+    fn _insert(&mut self, node: &mut Node, key: &Vec<u8>, value: &Vec<u8>, offset: u64) {
+        if node.children.is_empty() {
+            // leaf node
+            let pos = node.keys.binary_search(&key).unwrap_or_else(|e| e);
+            node.keys.insert(pos, key.clone());
+            node.values.insert(pos, value.clone());
+            save_node(&mut self.file, offset, node).unwrap();
+        } else {
+            // internal node
+            let pos = match node.keys.binary_search(&key) {
+                Ok(pos) => pos+1,
+                Err(pos) => pos
+            };
+
+            let offset = node.children[pos];
+            let mut child_node = load_node(&mut self.file, offset).unwrap();
+            self._insert(&mut child_node, key, value, offset);
+        };
     }
 }
 
@@ -154,7 +180,6 @@ pub fn decode_node(buf: Vec<u8>) -> Node {
         let val_end = val_start+val_len;
 
         let key = buf[key_start..key_end].to_vec();
-        let val = buf[val_start..val_end].to_vec();
 
         keys.push(key);
 
@@ -165,4 +190,19 @@ pub fn decode_node(buf: Vec<u8>) -> Node {
     }
 
     Node { keys, children, values }
+}
+
+pub fn load_node(file: &mut File, offset: u64) -> std::io::Result<Node> {
+    let mut buf = vec![0u8; BTREE_PAGE_SIZE as usize];
+    file.seek(SeekFrom::Start(offset))?;
+    file.read_exact(&mut buf)?;
+    Ok(decode_node(buf))
+}
+
+pub fn save_node(file: &mut File, offset: u64, node: &Node) -> std::io::Result<()> {
+    let encoded = encode_node(node);
+    file.seek(SeekFrom::Start(offset))?;
+    file.write_all(&encoded)?;
+    file.sync_all()?;
+    Ok(())
 }
