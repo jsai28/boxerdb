@@ -15,8 +15,8 @@ pub struct Node {
 }
 
 pub struct BTree {
-    root: Node,
-    file: File,
+    pub root: Node,
+    pub file: File,
 }
 
 impl BTree {
@@ -57,16 +57,26 @@ impl BTree {
     }
 
     pub fn insert(&mut self, key: Vec<u8>, value: Vec<u8>) {
-        self._insert(&mut self.root, &key, &value, 0);
+        let file = &mut self.file;
+        let root = &mut self.root;
+        Self::_insert(root, &key, &value, 0, file);
     }
 
-    fn _insert(&mut self, node: &mut Node, key: &Vec<u8>, value: &Vec<u8>, offset: u64) {
+    fn _insert(node: &mut Node, key: &Vec<u8>, value: &Vec<u8>, offset: u64, file: &mut File) {
         if node.children.is_empty() {
             // leaf node
-            let pos = node.keys.binary_search(&key).unwrap_or_else(|e| e);
-            node.keys.insert(pos, key.clone());
-            node.values.insert(pos, value.clone());
-            save_node(&mut self.file, offset, node).unwrap();
+            match node.keys.binary_search(&key) {
+                Ok(pos) => {
+                    // Key exists — update value
+                    node.values[pos] = value.clone();
+                }
+                Err(pos) => {
+                    // Key doesn't exist — insert
+                    node.keys.insert(pos, key.clone());
+                    node.values.insert(pos, value.clone());
+                }
+            }
+            save_node(file, offset, node).unwrap();
         } else {
             // internal node
             let pos = match node.keys.binary_search(&key) {
@@ -75,8 +85,8 @@ impl BTree {
             };
 
             let offset = node.children[pos];
-            let mut child_node = load_node(&mut self.file, offset).unwrap();
-            self._insert(&mut child_node, key, value, offset);
+            let mut child_node = load_node(file, offset).unwrap();
+            Self::_insert(&mut child_node, key, value, offset, file);
         };
     }
 }
