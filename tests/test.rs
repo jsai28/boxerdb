@@ -77,7 +77,7 @@ fn test_insert_single() {
     let mut btree = get_temp_btree();
     btree.insert(b"key1".to_vec(), b"value1".to_vec());
 
-    let root = load_node(&mut btree.file, 0).unwrap();
+    let root = load_node(&mut btree.file, 4096).unwrap();
     assert_eq!(root.keys.len(), 1);
     assert_eq!(root.keys[0], b"key1");
     assert_eq!(root.values[0], b"value1");
@@ -90,7 +90,7 @@ fn test_insert_multiple_sorted_order() {
     btree.insert(b"a".to_vec(), b"1".to_vec());
     btree.insert(b"c".to_vec(), b"3".to_vec());
 
-    let root = load_node(&mut btree.file, 0).unwrap();
+    let root = load_node(&mut btree.file, 4096).unwrap();
     assert_eq!(root.keys.len(), 3);
     assert_eq!(root.keys[0], b"a");
     assert_eq!(root.values[0], b"1");
@@ -117,7 +117,7 @@ fn test_persisted_btree_read_after_write() {
     // Reload
     {
         let mut btree = BTree::new(&path).unwrap();
-        let root = load_node(&mut btree.file, 0).unwrap();
+        let root = load_node(&mut btree.file, 4096).unwrap();
         assert_eq!(root.keys, vec![b"alpha".to_vec(), b"beta".to_vec(), b"gamma".to_vec()]);
         assert_eq!(root.values, vec![b"1".to_vec(), b"2".to_vec(), b"3".to_vec()]);
     }

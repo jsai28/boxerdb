@@ -7,6 +7,22 @@ const BTREE_MAX_VAL_SIZE: u16 = 3000;
 const BNODE_INTERNAL: u8 = 0;
 const BNODE_LEAF: u8 = 1;
 
+fn read_metadata(file: &mut File) ->  std::io::Result<u64> {
+    let mut buf = [0u8; 8];
+    file.seek(SeekFrom::Start(0))?;
+    file.read_exact(&mut buf)?;
+    Ok(u64::from_le_bytes(buf))
+}
+
+fn write_metadata(file: &mut File, root_offset: u64) ->  std::io::Result<()> {
+    let mut block = [0u8; BTREE_PAGE_SIZE as usize];
+    block[..8].copy_from_slice(&root_offset.to_le_bytes());
+    file.seek(SeekFrom::Start(0))?;
+    file.write_all(&block)?;
+    file.sync_all()?;
+    Ok(())
+}
+
 #[derive(Clone, PartialEq, Debug)]
 pub struct Node {
     pub keys: Vec<Vec<u8>>,
@@ -16,6 +32,7 @@ pub struct Node {
 
 pub struct BTree {
     pub root: Node,
+    pub root_offset: u64,
     pub file: File,
 }
 
@@ -39,27 +56,25 @@ impl BTree {
                 children: vec![],
             };
 
-            let encoded_root = encode_node(&root);
-            file.write_all(&encoded_root)?;
-            file.sync_all()?;
-            Ok(Self { root, file })
+            let root_offset = BTREE_PAGE_SIZE as u64; // page 1
+            write_metadata(&mut file, root_offset)?;
+            append_node(&mut file, root_offset, &root)?;
+
+            Ok(Self { root, root_offset, file })
         } else {
             // decode root node
-            let mut buf = vec![0u8; BTREE_PAGE_SIZE as usize];
+            let root_offset = read_metadata(&mut file)?;
+            let root = load_node(&mut file, root_offset)?;
 
-            file.seek(SeekFrom::Start(0))?;
-            file.read_exact(&mut buf)?;
-
-            let root = decode_node(buf);
-
-            Ok(Self { root, file })
+            Ok(Self { root, root_offset, file })
         }
     }
 
     pub fn insert(&mut self, key: Vec<u8>, value: Vec<u8>) {
         let file = &mut self.file;
         let root = &mut self.root;
-        Self::_insert(root, &key, &value, 0, file);
+        let root_offset = self.root_offset;
+        Self::_insert(root, &key, &value, root_offset, file);
     }
 
     fn _insert(node: &mut Node, key: &Vec<u8>, value: &Vec<u8>, offset: u64, file: &mut File) {
@@ -76,7 +91,7 @@ impl BTree {
                     node.values.insert(pos, value.clone());
                 }
             }
-            save_node(file, offset, node).unwrap();
+            append_node(file, offset, node).unwrap();
         } else {
             // internal node
             let pos = match node.keys.binary_search(&key) {
@@ -209,7 +224,7 @@ pub fn load_node(file: &mut File, offset: u64) -> std::io::Result<Node> {
     Ok(decode_node(buf))
 }
 
-pub fn save_node(file: &mut File, offset: u64, node: &Node) -> std::io::Result<()> {
+pub fn append_node(file: &mut File, offset: u64, node: &Node) -> std::io::Result<()> {
     let encoded = encode_node(node);
     file.seek(SeekFrom::Start(offset))?;
     file.write_all(&encoded)?;
