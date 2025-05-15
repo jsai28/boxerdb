@@ -3,23 +3,8 @@ use crate::storage::constants::{
 };
 use crate::storage::node::{Node};
 use std::fs::File;
-use std::io::{Read, Seek, SeekFrom, Write};
-
-fn read_metadata(file: &mut File) -> std::io::Result<u64> {
-    let mut buf = [0u8; 8];
-    file.seek(SeekFrom::Start(0))?;
-    file.read_exact(&mut buf)?;
-    Ok(u64::from_le_bytes(buf))
-}
-
-fn write_metadata(file: &mut File, root_offset: u64) -> std::io::Result<()> {
-    let mut block = [0u8; BTREE_PAGE_SIZE as usize];
-    block[..8].copy_from_slice(&root_offset.to_le_bytes());
-    file.seek(SeekFrom::Start(0))?;
-    file.write_all(&block)?;
-    file.sync_all()?;
-    Ok(())
-}
+use std::io::{Read, Seek, Write};
+use crate::storage::pager::{append_node_to_disk, load_node_to_disk, read_metadata, write_metadata};
 
 pub struct BTree {
     pub root: Node,
@@ -103,21 +88,6 @@ impl BTree {
             Self::_insert(&mut child_node, key, value, offset, file);
         };
     }
-}
-
-pub fn load_node_to_disk(file: &mut File, offset: u64) -> std::io::Result<Node> {
-    let mut buf = vec![0u8; BTREE_PAGE_SIZE as usize];
-    file.seek(SeekFrom::Start(offset))?;
-    file.read_exact(&mut buf)?;
-    Ok(Node::decode_node(buf))
-}
-
-pub fn append_node_to_disk(file: &mut File, offset: u64, node: &Node) -> std::io::Result<()> {
-    let encoded = Node::encode_node(node);
-    file.seek(SeekFrom::Start(offset))?;
-    file.write_all(&encoded)?;
-    file.sync_all()?;
-    Ok(())
 }
 
 #[cfg(test)]

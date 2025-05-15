@@ -126,7 +126,7 @@ impl Node {
 
 #[cfg(test)]
 mod test {
-    use crate::storage::node::Node;
+    use super::*;
 
     fn create_sample_node() -> Node {
         let keys = vec![b"key1".to_vec(), b"key2".to_vec(), b"key3".to_vec()];
