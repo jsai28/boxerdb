@@ -80,3 +80,8 @@ pub fn append_node_to_disk(file: &mut File, offset: u64, node: &Node) -> Result<
     file.sync_all()?;
     Ok(())
 }
+
+/// Get a new offset
+pub fn get_new_offset(file: &mut File) -> Result<u64> {
+    file.seek(SeekFrom::End(0))
+}
