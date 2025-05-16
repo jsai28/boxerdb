@@ -1,10 +1,7 @@
-use crate::storage::constants::{
-    BTREE_PAGE_SIZE,
-};
 use crate::storage::node::{Node};
 use std::fs::File;
 use std::io::{Read, Seek, Write};
-use crate::storage::pager::{append_node_to_disk, load_node_to_disk, read_metadata, write_metadata};
+use crate::storage::pager::{create_db_file, read_metadata, write_metadata, load_node_from_disk, append_node_to_disk};
 
 pub struct BTree {
     pub root: Node,
@@ -14,50 +11,23 @@ pub struct BTree {
 
 impl BTree {
     pub fn new(path: &str) -> std::io::Result<Self> {
-        let dir = std::path::Path::new(path).parent().unwrap();
-        std::fs::create_dir_all(dir)?;
+        let mut file = create_db_file(path)?;
+        // load in root node
+        let root_offset = read_metadata(&mut file)?;
+        let root = load_node_from_disk(&mut file, root_offset)?;
 
-        let mut file = std::fs::OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create(true)
-            .open(path)?;
-
-        let metadata = file.metadata()?;
-        if metadata.len() == 0 {
-            // file is empty
-            let root = Node {
-                keys: vec![],
-                values: vec![],
-                children: vec![],
-            };
-
-            let root_offset = BTREE_PAGE_SIZE as u64; // page 1
-            write_metadata(&mut file, root_offset)?;
-            append_node_to_disk(&mut file, root_offset, &root)?;
-
-            Ok(Self {
-                root,
-                root_offset,
-                file,
-            })
-        } else {
-            // decode root node
-            let root_offset = read_metadata(&mut file)?;
-            let root = load_node_to_disk(&mut file, root_offset)?;
-
-            Ok(Self {
-                root,
-                root_offset,
-                file,
-            })
-        }
+        Ok(Self {
+            root,
+            root_offset,
+            file,
+        })
     }
 
     pub fn insert(&mut self, key: Vec<u8>, value: Vec<u8>) {
         let file = &mut self.file;
         let root = &mut self.root;
         let root_offset = self.root_offset;
+
         Self::_insert(root, &key, &value, root_offset, file);
     }
 
@@ -84,7 +54,7 @@ impl BTree {
             };
 
             let offset = node.children[pos];
-            let mut child_node = load_node_to_disk(file, offset).unwrap();
+            let mut child_node = load_node_from_disk(file, offset).unwrap();
             Self::_insert(&mut child_node, key, value, offset, file);
         };
     }
@@ -96,8 +66,11 @@ mod test {
     use tempfile::NamedTempFile;
 
     fn get_temp_btree() -> BTree {
-        let tmp = NamedTempFile::new().unwrap();
-        BTree::new(tmp.path().to_str().unwrap()).unwrap()
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("btree.db");
+
+        BTree::new(path.to_str().unwrap()).unwrap()
+
     }
 
     #[test]
@@ -105,7 +78,7 @@ mod test {
         let mut btree = get_temp_btree();
         btree.insert(b"key1".to_vec(), b"value1".to_vec());
 
-        let root = load_node_to_disk(&mut btree.file, 4096).unwrap();
+        let root = load_node_from_disk(&mut btree.file, 4096).unwrap();
         assert_eq!(root.keys.len(), 1);
         assert_eq!(root.keys[0], b"key1");
         assert_eq!(root.values[0], b"value1");
@@ -118,7 +91,7 @@ mod test {
         btree.insert(b"a".to_vec(), b"1".to_vec());
         btree.insert(b"c".to_vec(), b"3".to_vec());
 
-        let root = load_node_to_disk(&mut btree.file, 4096).unwrap();
+        let root = load_node_from_disk(&mut btree.file, 4096).unwrap();
         assert_eq!(root.keys.len(), 3);
         assert_eq!(root.keys[0], b"a");
         assert_eq!(root.values[0], b"1");
@@ -145,7 +118,7 @@ mod test {
         // Reload
         {
             let mut btree = BTree::new(&path).unwrap();
-            let root = load_node_to_disk(&mut btree.file, 4096).unwrap();
+            let root = load_node_from_disk(&mut btree.file, 4096).unwrap();
             assert_eq!(
                 root.keys,
                 vec![b"alpha".to_vec(), b"beta".to_vec(), b"gamma".to_vec()]
