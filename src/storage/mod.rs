@@ -1,4 +1,4 @@
 mod btree;
-mod constants;
+mod configs;
 mod node;
-mod pager;
+mod diskmanager;

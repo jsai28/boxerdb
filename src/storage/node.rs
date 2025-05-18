@@ -1,4 +1,4 @@
-use crate::storage::constants::{BNODE_INTERNAL, BNODE_LEAF, BTREE_MAX_KEY_SIZE, BTREE_MAX_VAL_SIZE, BTREE_PAGE_SIZE};
+use crate::storage::configs::{StorageConfig, BNODE_INTERNAL, BNODE_LEAF};
 
 #[derive(Clone, PartialEq, Debug)]
 pub struct Node {
@@ -11,8 +11,8 @@ impl Node {
     // Encode the keys, values, and children of a node + metadata
     // Node = node_type (u8) + num_of_keys (u16) + pointers (u64) + offsets (u16) + KV pairs (4000 bytes) + unused space
     // KV pairs = key_len (u16) + val_len (u16) + key bytes + val bytes
-    pub fn encode_node(node: &Node) -> Vec<u8> {
-        let mut buf = vec![0u8; BTREE_PAGE_SIZE as usize];
+    pub fn encode_node(node: &Node, storage_config: StorageConfig) -> Vec<u8> {
+        let mut buf = vec![0u8; storage_config.page_size as usize];
         let mut node_type = BNODE_LEAF;
         if !node.children.is_empty() {
             node_type = BNODE_INTERNAL;
@@ -45,8 +45,8 @@ impl Node {
             let key_len = key.len() as u16;
             let val_len = val.len() as u16;
 
-            assert!(key_len <= BTREE_MAX_KEY_SIZE);
-            assert!(val_len <= BTREE_MAX_VAL_SIZE);
+            assert!(key_len <= storage_config.max_key_size);
+            assert!(val_len <= storage_config.max_val_size);
 
             let offset = cursor as u16;
             let offset_pos = offsets_start + i * 2;

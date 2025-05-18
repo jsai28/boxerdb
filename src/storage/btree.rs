@@ -1,16 +1,22 @@
-use crate::storage::node::{Node};
+use crate::storage::node::Node;
+use crate::storage::diskmanager::{
+    append_node_to_disk, create_db_file, get_new_offset, load_node_from_disk, read_metadata,
+    write_metadata,
+};
+use crate::storage::configs::{StorageConfig};
 use std::fs::File;
 use std::io::{Read, Seek, Write};
-use crate::storage::pager::{create_db_file, read_metadata, load_node_from_disk, append_node_to_disk, get_new_offset, write_metadata};
 
 pub struct BTree {
     pub root: Node,
     pub root_offset: u64,
     pub file: File,
+    pub storage_config: StorageConfig,
 }
 
 impl BTree {
-    pub fn new(path: &str) -> std::io::Result<Self> {
+    pub fn new(path: &str, storage_config: Option<StorageConfig>) -> std::io::Result<Self> {
+        let storage_config = storage_config.unwrap_or_default();
         let mut file = create_db_file(path)?;
         // load in root node
         let root_offset = read_metadata(&mut file)?;
@@ -20,6 +26,7 @@ impl BTree {
             root,
             root_offset,
             file,
+            storage_config,
         })
     }
 
@@ -84,7 +91,6 @@ mod test {
     fn get_temp_btree() -> BTree {
         let tmp = NamedTempFile::new().unwrap();
         BTree::new(tmp.path().to_str().unwrap()).unwrap()
-
     }
 
     #[test]
