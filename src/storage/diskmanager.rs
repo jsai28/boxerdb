@@ -5,20 +5,20 @@ use std::io::{ErrorKind, Read, Result, Seek, SeekFrom, Write};
 use std::path::Path;
 
 /// All functions related to reading and writing from disk
-struct DiskManager {
-    file: File,
-    config: StorageConfig,
+pub struct DiskManager {
+    pub file: File,
+    pub config: StorageConfig,
 }
 
 impl DiskManager {
     /// Open or create a file, load metadata
-    fn new(path: &str, config: StorageConfig) -> Result<Self> {
+    pub fn new(path: &str, config: StorageConfig) -> Result<Self> {
         // create the directory if it doesn't exist
         let dir = Path::new(path).parent().unwrap();
         std::fs::create_dir_all(dir)?;
 
         // read file if it exists, else create it
-        let mut file = OpenOptions::new()
+        let file = OpenOptions::new()
             .read(true)
             .write(true)
             .create(true)

@@ -147,7 +147,7 @@ mod test {
             children: vec![],
         };
 
-        let encoded = Node::encode_node(&node);
+        let encoded = Node::encode_node(&node, StorageConfig::default());
         let decoded = Node::decode_node(encoded);
 
         assert_eq!(node.keys, decoded.keys);
@@ -159,7 +159,7 @@ mod test {
     fn test_encode_decode_roundtrip_2() {
         let node = create_sample_node();
 
-        let encoded = Node::encode_node(&node);
+        let encoded = Node::encode_node(&node, StorageConfig::default());
         let decoded = Node::decode_node(encoded);
 
         assert_eq!(node.keys, decoded.keys);
@@ -175,7 +175,7 @@ mod test {
             children: vec![10, 20, 30],
         };
 
-        let encoded = Node::encode_node(&node);
+        let encoded = Node::encode_node(&node, StorageConfig::default());
         let decoded = Node::decode_node(encoded);
 
         assert_eq!(node.keys, decoded.keys);
