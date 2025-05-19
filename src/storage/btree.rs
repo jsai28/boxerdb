@@ -1,5 +1,5 @@
 use crate::storage::node::Node;
-use crate::storage::diskmanager::DiskManager;
+use crate::storage::diskmanager::{DiskManager, EncodeResult};
 use crate::storage::configs::{StorageConfig};
 
 pub struct BTree {
@@ -50,9 +50,15 @@ impl BTree {
             }
 
             let new_offset = self.disk_manager.get_new_offset().unwrap();
-            self.disk_manager.append_node_to_disk(new_offset, &update_node).unwrap();
-
-            new_offset
+            match self.disk_manager.append_node_to_disk(new_offset, &update_node) {
+                EncodeResult::Encoded => {
+                    // write ok
+                    new_offset
+                }
+                EncodeResult::NeedSplit => {
+                    panic!("Need to split")
+                }
+            }
         } else {
             // internal node
             let pos = match node.keys.binary_search(&key) {
@@ -68,7 +74,7 @@ impl BTree {
             update_node.children[pos] = child_offset;
 
             let new_offset = self.disk_manager.get_new_offset().unwrap();
-            self.disk_manager.append_node_to_disk(new_offset, &update_node).unwrap();
+            self.disk_manager.append_node_to_disk(new_offset, &update_node);
 
             new_offset
         }
@@ -83,6 +89,20 @@ mod test {
     fn get_temp_btree() -> BTree {
         let tmp = NamedTempFile::new().unwrap();
         BTree::new(tmp.path().to_str().unwrap(), None).unwrap()
+    }
+
+    fn get_temp_btree_new_configs() -> BTree {
+        let tmp = NamedTempFile::new().unwrap();
+
+        let storage_config = StorageConfig {
+            page_size: 30,
+            max_key_size: 10,
+            max_val_size: 30,
+            metadata_offset: 0,
+            first_page_offset: 30,
+        };
+
+        BTree::new(tmp.path().to_str().unwrap(), Some(storage_config)).unwrap()
     }
 
     #[test]
@@ -141,5 +161,39 @@ mod test {
                 vec![b"1".to_vec(), b"2".to_vec(), b"3".to_vec()]
             );
         }
+    }
+
+    #[test]
+    fn test_node_split_path_panics_on_overflow() {
+        let mut btree = get_temp_btree_new_configs();
+        btree.insert(b"alpha".to_vec(), b"1".to_vec());
+
+        let result = std::panic::catch_unwind(move || {
+            // move btree into the closure so it's owned, satisfying `UnwindSafe`
+            let mut btree = btree;
+            btree.insert(b"abcdefghi".to_vec(), b"1".to_vec()); // 31 bytes exceeds page size, so split
+        });
+
+        assert!(result.is_err(), "Expected panic due to overflow");
+    }
+
+    #[test]
+    fn test_node_key_greater_than_max() {
+        let result = std::panic::catch_unwind(move || {
+            let mut btree = get_temp_btree_new_configs();
+            btree.insert(b"12345678910".to_vec(), b"1".to_vec());
+        });
+
+        assert!(result.is_err(), "Expected panic due to key_len > max_key_size");
+    }
+
+    #[test]
+    fn test_node_value_greater_than_max() {
+        let result = std::panic::catch_unwind(move || {
+            let mut btree = get_temp_btree_new_configs();
+            btree.insert(b"1".to_vec(), b"012345678901234567890123456789".to_vec());
+        });
+
+        assert!(result.is_err(), "Expected panic due to val_len > max_val_size");
     }
 }

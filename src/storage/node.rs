@@ -8,10 +8,10 @@ pub struct Node {
 }
 
 impl Node {
-    // Encode the keys, values, and children of a node + metadata
-    // Node = node_type (u8) + num_of_keys (u16) + pointers (u64) + offsets (u16) + KV pairs (4000 bytes) + unused space
-    // KV pairs = key_len (u16) + val_len (u16) + key bytes + val bytes
-    pub fn encode_node(node: &Node, storage_config: StorageConfig) -> Vec<u8> {
+    /// Encode the keys, values, and children of a node + metadata
+    /// Node = node_type (u8) + num_of_keys (u16) + pointers (u64) + offsets (u16) + KV pairs (4000 bytes) + unused space
+    /// KV pairs = key_len (u16) + val_len (u16) + key bytes + val bytes
+    pub fn encode_node(node: &Node, storage_config: StorageConfig) -> Option<Vec<u8>> {
         let mut buf = vec![0u8; storage_config.page_size as usize];
         let mut node_type = BNODE_LEAF;
         if !node.children.is_empty() {
@@ -52,6 +52,11 @@ impl Node {
             let offset_pos = offsets_start + i * 2;
             buf[offset_pos..offset_pos + 2].copy_from_slice(&offset.to_le_bytes());
 
+            let needed_space = 2+2+key.len()+val.len(); // 2 bytes for each length
+            if cursor + needed_space > buf.len() {
+                return None;
+            }
+
             buf[cursor..cursor + 2].copy_from_slice(&key_len.to_le_bytes());
             buf[cursor + 2..cursor + 4].copy_from_slice(&val_len.to_le_bytes());
             cursor += 4;
@@ -65,7 +70,7 @@ impl Node {
             cursor += val_len as usize;
         }
 
-        buf
+        Some(buf)
     }
 
     pub fn decode_node(buf: Vec<u8>) -> Node {
@@ -148,7 +153,7 @@ mod test {
         };
 
         let encoded = Node::encode_node(&node, StorageConfig::default());
-        let decoded = Node::decode_node(encoded);
+        let decoded = Node::decode_node(encoded.unwrap());
 
         assert_eq!(node.keys, decoded.keys);
         assert_eq!(node.values, decoded.values);
@@ -160,7 +165,7 @@ mod test {
         let node = create_sample_node();
 
         let encoded = Node::encode_node(&node, StorageConfig::default());
-        let decoded = Node::decode_node(encoded);
+        let decoded = Node::decode_node(encoded.unwrap());
 
         assert_eq!(node.keys, decoded.keys);
         assert_eq!(node.values, decoded.values);
@@ -176,7 +181,7 @@ mod test {
         };
 
         let encoded = Node::encode_node(&node, StorageConfig::default());
-        let decoded = Node::decode_node(encoded);
+        let decoded = Node::decode_node(encoded.unwrap());
 
         assert_eq!(node.keys, decoded.keys);
         assert_eq!(node.values, decoded.values);
