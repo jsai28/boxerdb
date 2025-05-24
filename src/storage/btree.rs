@@ -56,7 +56,37 @@ impl BTree {
                     new_offset
                 }
                 EncodeResult::NeedSplit => {
-                    panic!("Need to split")
+                    // find middle node, promote to parent
+                    // everything left of middle, put in left node
+                    // everything right of middle, put in right node
+                    let mid = update_node.keys.len() / 2;
+                    let left_node = Node {
+                        keys: update_node.keys[..mid].to_vec(),
+                        children: vec![],
+                        values: update_node.values[..mid].to_vec()
+                    };
+                    let right_node = Node {
+                        keys: update_node.keys[mid..].to_vec(),
+                        children: vec![],
+                        values: update_node.values[mid..].to_vec()
+                    };
+
+                    self.disk_manager.append_node_to_disk(new_offset, &left_node);
+
+                    let right_offset = self.disk_manager.get_new_offset().unwrap();
+                    self.disk_manager.append_node_to_disk(right_offset, &right_node);
+
+                    // promote middle node
+                    let middle_key = right_node.keys[0].clone();
+                    let internal_node = Node {
+                        keys: vec![middle_key],
+                        values: vec![],
+                        children: vec![new_offset, right_offset],
+                    };
+
+                    let middle_offset = self.disk_manager.get_new_offset().unwrap();
+                    self.disk_manager.append_node_to_disk(middle_offset, &internal_node);
+                    middle_offset
                 }
             }
         } else {
@@ -95,9 +125,11 @@ mod test {
         let tmp = NamedTempFile::new().unwrap();
 
         let storage_config = StorageConfig {
+            // bad configs, can lead to splits that dont make sense
+            // only for testing purposes
             page_size: 30,
             max_key_size: 10,
-            max_val_size: 30,
+            max_val_size: 10,
             metadata_offset: 0,
             first_page_offset: 30,
         };
@@ -164,17 +196,34 @@ mod test {
     }
 
     #[test]
-    fn test_node_split_path_panics_on_overflow() {
+    fn test_node_split_path_promotes_correct_key() {
         let mut btree = get_temp_btree_new_configs();
+
+        // Insert keys in order that will trigger a split
         btree.insert(b"alpha".to_vec(), b"1".to_vec());
+        btree.insert(b"beta".to_vec(), b"1".to_vec());
+        btree.insert(b"charlie".to_vec(), b"1".to_vec());
 
-        let result = std::panic::catch_unwind(move || {
-            // move btree into the closure so it's owned, satisfying `UnwindSafe`
-            let mut btree = btree;
-            btree.insert(b"abcdefghi".to_vec(), b"1".to_vec()); // 31 bytes exceeds page size, so split
-        });
+        // Now we check internal structure
+        let root_offset = btree.root_offset;
+        let root_node = btree.disk_manager.load_node_from_disk(root_offset).unwrap();
 
-        assert!(result.is_err(), "Expected panic due to overflow");
+        // Root should be internal node with one promoted key: "beta"
+        assert_eq!(root_node.keys.len(), 1);
+        assert_eq!(root_node.keys[0], b"beta".to_vec());
+        assert_eq!(root_node.children.len(), 2);
+
+        // Read children from disk
+        let left_child = btree.disk_manager.load_node_from_disk(root_node.children[0]).unwrap();
+        let right_child = btree.disk_manager.load_node_from_disk(root_node.children[1]).unwrap();
+
+        // Check right leaf contains "charlie"
+        assert_eq!(right_child.keys, vec![b"beta".to_vec(), b"charlie".to_vec()]);
+        assert_eq!(right_child.values, vec![b"1".to_vec(), b"1".to_vec()]);
+
+        // Check left leaf contains "alpha"
+        assert_eq!(left_child.keys, vec![b"alpha".to_vec()]);
+        assert_eq!(left_child.values, vec![b"1".to_vec()]);
     }
 
     #[test]
