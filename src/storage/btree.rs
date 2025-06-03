@@ -26,14 +26,72 @@ impl BTree {
     }
 
     pub fn insert(&mut self, key: Vec<u8>, value: Vec<u8>) {
-        let new_offset = self._insert(&mut self.root.clone(), &key, &value);
-        self.root_offset = new_offset;
-        self.disk_manager.write_metadata(self.root_offset).unwrap();
+        let result = self._insert(&mut self.root.clone(), &key, &value);
 
-        self.root = self.disk_manager.load_node_from_disk(self.root_offset).unwrap();
+        match result.splits {
+            None => {
+                self.root_offset = result.new_offset;
+                self.disk_manager.write_metadata(self.root_offset).unwrap();
+                self.root = self.disk_manager.load_node_from_disk(self.root_offset).unwrap();
+            }
+            Some(splits) => {
+                // build new root
+                let promoted_key = splits.promoted_key;
+                let left_offset = splits.left_offset;
+                let right_offset = splits.right_offset;
+
+                let new_root = Node {
+                    keys: vec![promoted_key],
+                    children: vec![left_offset, right_offset],
+                    values: vec![],
+                };
+
+                let new_offset = self.disk_manager.get_new_offset().unwrap();
+                match self.disk_manager.append_node_to_disk(new_offset, &new_root) {
+                    EncodeResult::Encoded => {
+                        self.root_offset = new_offset;
+                        self.disk_manager.write_metadata(self.root_offset).unwrap();
+                        self.root = self.disk_manager.load_node_from_disk(self.root_offset).unwrap();
+                    }
+                    EncodeResult::NeedSplit => {
+                        let root_clone = self.root.clone();
+                        let mid = root_clone.keys.len() / 2;
+                        let left_node = Node {
+                            keys: root_clone.keys[..mid].to_vec(),
+                            children: root_clone.children[..mid].to_vec(),
+                            values: vec![]
+                        };
+                        let right_node = Node {
+                            keys: root_clone.keys[mid..].to_vec(),
+                            children: root_clone.children[mid..].to_vec(),
+                            values: vec![]
+                        };
+
+                        self.disk_manager.append_node_to_disk(new_offset, &left_node);
+
+                        let right_offset = self.disk_manager.get_new_offset().unwrap();
+                        self.disk_manager.append_node_to_disk(right_offset, &right_node);
+
+                        let middle_key = right_node.keys[0].clone();
+                        let new_root = Node {
+                            keys: vec![middle_key],
+                            children: vec![left_offset, right_offset],
+                            values: vec![]
+                        };
+
+                        let new_root_offset = self.disk_manager.get_new_offset().unwrap();
+                        self.disk_manager.append_node_to_disk(new_root_offset, &new_root);
+
+                        self.root_offset = new_root_offset;
+                        self.disk_manager.write_metadata(self.root_offset).unwrap();
+                        self.root = self.disk_manager.load_node_from_disk(self.root_offset).unwrap();
+                    }
+                }
+            }
+        }
     }
 
-    fn _insert(&mut self, node: &mut Node, key: &Vec<u8>, value: &Vec<u8>) -> u64 {
+    fn _insert(&mut self, node: &mut Node, key: &Vec<u8>, value: &Vec<u8>) -> InsertResult {
         if node.children.is_empty() {
             // leaf node
             let mut update_node = node.clone();
@@ -50,45 +108,8 @@ impl BTree {
             }
 
             let new_offset = self.disk_manager.get_new_offset().unwrap();
-            match self.disk_manager.append_node_to_disk(new_offset, &update_node) {
-                EncodeResult::Encoded => {
-                    // write ok
-                    new_offset
-                }
-                EncodeResult::NeedSplit => {
-                    // find middle node, promote to parent
-                    // everything left of middle, put in left node
-                    // everything right of middle, put in right node
-                    let mid = update_node.keys.len() / 2;
-                    let left_node = Node {
-                        keys: update_node.keys[..mid].to_vec(),
-                        children: vec![],
-                        values: update_node.values[..mid].to_vec()
-                    };
-                    let right_node = Node {
-                        keys: update_node.keys[mid..].to_vec(),
-                        children: vec![],
-                        values: update_node.values[mid..].to_vec()
-                    };
+            self.propagate_splits(&mut update_node, new_offset)
 
-                    self.disk_manager.append_node_to_disk(new_offset, &left_node);
-
-                    let right_offset = self.disk_manager.get_new_offset().unwrap();
-                    self.disk_manager.append_node_to_disk(right_offset, &right_node);
-
-                    // promote middle node
-                    let middle_key = right_node.keys[0].clone();
-                    let internal_node = Node {
-                        keys: vec![middle_key],
-                        values: vec![],
-                        children: vec![new_offset, right_offset],
-                    };
-
-                    let middle_offset = self.disk_manager.get_new_offset().unwrap();
-                    self.disk_manager.append_node_to_disk(middle_offset, &internal_node);
-                    middle_offset
-                }
-            }
         } else {
             // internal node
             let pos = match node.keys.binary_search(&key) {
@@ -99,16 +120,116 @@ impl BTree {
             let offset = node.children[pos];
             let mut child_node = self.disk_manager.load_node_from_disk(offset).unwrap();
 
-            let child_offset = self._insert(&mut child_node, key, value);
+            let child_split = self._insert(&mut child_node, key, value);
             let mut update_node = node.clone();
-            update_node.children[pos] = child_offset;
 
-            let new_offset = self.disk_manager.get_new_offset().unwrap();
-            self.disk_manager.append_node_to_disk(new_offset, &update_node);
+            match child_split.splits {
+                None => {
+                    update_node.children[pos] = child_split.new_offset;
 
-            new_offset
+                    let new_offset = self.disk_manager.get_new_offset().unwrap();
+                    self.disk_manager.append_node_to_disk(new_offset, &update_node);
+
+                    InsertResult {
+                        new_offset,
+                        splits: None
+                    }
+                }
+                Some(splits) => {
+                    let insert_split = splits;
+
+                    let promoted_key = insert_split.promoted_key;
+                    let pos = match update_node.keys.binary_search(&promoted_key) {
+                        Ok(pos) => pos + 1,
+                        Err(pos) => pos,
+                    };
+                    update_node.keys.insert(pos, promoted_key);
+
+                    let left_offset = insert_split.left_offset;
+                    let right_offset = insert_split.right_offset;
+
+                    update_node.children.insert(pos, left_offset);
+                    update_node.children.insert(pos + 1, right_offset);
+
+                    let new_offset = self.disk_manager.get_new_offset().unwrap();
+                    self.propagate_splits(&mut update_node, new_offset)
+                }
+            }
         }
     }
+
+    fn propagate_splits(&mut self, node: &mut Node, new_offset: u64) -> InsertResult {
+        match self.disk_manager.append_node_to_disk(new_offset, &node) {
+            EncodeResult::Encoded => {
+                // write ok
+                InsertResult {
+                    new_offset,
+                    splits: None
+                }
+            }
+            EncodeResult::NeedSplit => {
+                let mid = (node.keys.len()) / 2;
+
+                let left_node;
+                let right_node;
+                if node.children.is_empty() {
+                    left_node = Node {
+                        keys: node.keys[..mid].to_vec(),
+                        children: vec![],
+                        values: node.values[..mid].to_vec()
+                    };
+                    right_node = Node {
+                        keys: node.keys[mid..].to_vec(),
+                        children: vec![],
+                        values: node.values[mid..].to_vec()
+                    };
+                } else {
+                    left_node = Node {
+                        keys: node.keys[..mid].to_vec(),
+                        children: node.children[..mid].to_vec(),
+                        values: vec![]
+                    };
+
+                    right_node = Node {
+                        keys: node.keys[mid..].to_vec(),
+                        children: node.children[mid..].to_vec(),
+                        values: vec![]
+                    };
+                }
+
+                self.disk_manager.append_node_to_disk(new_offset, &left_node);
+
+                let right_offset = self.disk_manager.get_new_offset().unwrap();
+                self.disk_manager.append_node_to_disk(right_offset, &right_node);
+
+                // promote middle node
+                let promoted_key = right_node.keys[0].clone();
+
+                let split = InsertSplit {
+                    promoted_key,
+                    left_offset: new_offset,
+                    right_offset
+                };
+
+                InsertResult {
+                    new_offset: 0, // 0 means new offset hasn't been created yet, create in calling function
+                    splits: Some(split)
+                }
+            }
+        }
+
+    }
+}
+
+struct InsertResult {
+    new_offset: u64,
+    splits: Option<InsertSplit>
+}
+
+struct InsertSplit {
+    promoted_key: Vec<u8>,
+    left_offset: u64,
+    right_offset: u64,
 }
 
 #[cfg(test)]
