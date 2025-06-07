@@ -148,6 +148,7 @@ impl BTree {
                     let left_offset = insert_split.left_offset;
                     let right_offset = insert_split.right_offset;
 
+                    update_node.children.remove(pos);
                     update_node.children.insert(pos, left_offset);
                     update_node.children.insert(pos + 1, right_offset);
 
@@ -287,37 +288,7 @@ mod test {
     }
 
     #[test]
-    fn test_persisted_btree_read_after_write() {
-        // Setup
-        let tmpfile = NamedTempFile::new().unwrap();
-        let path = tmpfile.path().to_str().unwrap().to_string();
-
-        // Insert
-        {
-            let mut btree = BTree::new(&path, None).unwrap();
-            btree.insert(b"alpha".to_vec(), b"1".to_vec());
-            btree.insert(b"beta".to_vec(), b"2".to_vec());
-            btree.insert(b"gamma".to_vec(), b"3".to_vec());
-        }
-
-        // Reload
-        {
-            let mut btree = BTree::new(&path, None).unwrap();
-            let root = btree.disk_manager.load_node_from_disk(btree.root_offset).unwrap();
-            assert_eq!(root.keys.len(), 3);
-            assert_eq!(
-                root.keys,
-                vec![b"alpha".to_vec(), b"beta".to_vec(), b"gamma".to_vec()]
-            );
-            assert_eq!(
-                root.values,
-                vec![b"1".to_vec(), b"2".to_vec(), b"3".to_vec()]
-            );
-        }
-    }
-
-    #[test]
-    fn test_node_split_path_promotes_correct_key() {
+    fn test_insert_creates_new_root() {
         let mut btree = get_temp_btree_new_configs();
 
         // Insert keys in order that will trigger a split
@@ -348,6 +319,63 @@ mod test {
     }
 
     #[test]
+    fn test_insert_with_internal_node() {
+        let mut btree = get_temp_btree_new_configs();
+
+        // Insert keys in order that will trigger a split
+        btree.insert(b"alpha".to_vec(), b"1".to_vec());
+        btree.insert(b"beta".to_vec(), b"1".to_vec());
+        btree.insert(b"charlie".to_vec(), b"1".to_vec());
+        // now, a new root has been created with beta as the root
+        // left node contains alpha, right node contains beta and charlie
+
+        // insert into left node
+        btree.insert(b"alpaca".to_vec(), b"1".to_vec());
+        btree.insert(b"alpacab".to_vec(), b"1".to_vec());
+
+        // insert into right node
+        //btree.insert(b"carl".to_vec(), b"1".to_vec());
+
+        let root_offset = btree.root_offset;
+        let root_node = btree.disk_manager.load_node_from_disk(root_offset).unwrap();
+
+        let left_child = btree.disk_manager.load_node_from_disk(root_node.children[0]).unwrap();
+        let right_child = btree.disk_manager.load_node_from_disk(root_node.children[1]).unwrap();
+        assert_eq!(left_child.keys, vec![b"alpaca".to_vec(), b"alpacab".to_vec(), b"alpha".to_vec()]);
+        //assert_eq!(right_child.keys, vec![b"beta".to_vec(), b"carl".to_vec(), b"charlie".to_vec()]);
+    }
+
+    #[test]
+    fn test_persisted_btree_read_after_write() {
+        // Setup
+        let tmpfile = NamedTempFile::new().unwrap();
+        let path = tmpfile.path().to_str().unwrap().to_string();
+
+        // Insert
+        {
+            let mut btree = BTree::new(&path, None).unwrap();
+            btree.insert(b"alpha".to_vec(), b"1".to_vec());
+            btree.insert(b"beta".to_vec(), b"2".to_vec());
+            btree.insert(b"gamma".to_vec(), b"3".to_vec());
+        }
+
+        // Reload
+        {
+            let mut btree = BTree::new(&path, None).unwrap();
+            let root = btree.disk_manager.load_node_from_disk(btree.root_offset).unwrap();
+            assert_eq!(root.keys.len(), 3);
+            assert_eq!(
+                root.keys,
+                vec![b"alpha".to_vec(), b"beta".to_vec(), b"gamma".to_vec()]
+            );
+            assert_eq!(
+                root.values,
+                vec![b"1".to_vec(), b"2".to_vec(), b"3".to_vec()]
+            );
+        }
+    }
+
+    #[test]
     fn test_node_key_greater_than_max() {
         let result = std::panic::catch_unwind(move || {
             let mut btree = get_temp_btree_new_configs();
@@ -365,5 +393,25 @@ mod test {
         });
 
         assert!(result.is_err(), "Expected panic due to val_len > max_val_size");
+    }
+
+    #[test]
+    fn test_insert_duplicate_overwrites() {
+        let mut btree = get_temp_btree();
+        btree.insert(b"dup".to_vec(), b"one".to_vec());
+        btree.insert(b"dup".to_vec(), b"two".to_vec());
+
+        let root = btree.disk_manager.load_node_from_disk(btree.root_offset).unwrap();
+        assert_eq!(root.keys, vec![b"dup".to_vec()]);
+        assert_eq!(root.values, vec![b"two".to_vec()]);
+    }
+
+    #[test]
+    fn test_insert_empty_key_and_value() {
+        let mut btree = get_temp_btree();
+        btree.insert(vec![], vec![]);
+        let root = btree.disk_manager.load_node_from_disk(btree.root_offset).unwrap();
+        assert_eq!(root.keys, vec![vec![]]);
+        assert_eq!(root.values, vec![vec![]]);
     }
 }
