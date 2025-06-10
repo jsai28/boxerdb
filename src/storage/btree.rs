@@ -26,10 +26,14 @@ impl BTree {
     }
 
     pub fn insert(&mut self, key: Vec<u8>, value: Vec<u8>) {
-        let result = self.insert_recursive(&mut self.root.clone(), key, value);
+        let mut root_clone = self.root.clone();
+        let result = self.insert_recursive(&mut root_clone, &key, &value);
 
         match result.splits {
             None => {
+                // need to change this so it doesnt make the returned offset equal to roof offset
+                // check where key goes in roots children if it has any
+                // overwrite child pointer with result.new_offset
                 self.root_offset = result.new_offset;
                 self.disk_manager.write_metadata(self.root_offset).unwrap();
                 self.root = self.disk_manager.load_node_from_disk(self.root_offset).unwrap();
@@ -52,10 +56,41 @@ impl BTree {
         }
     }
 
-    fn insert_recursive(&mut self, node: &mut Node, key: Vec<u8>, value: Vec<u8>) -> InsertResult {
+    fn insert_recursive(&mut self, node: &mut Node, key: &Vec<u8>, value: &Vec<u8>) -> InsertResult {
+        if node.children.len() == 0 {
+            // leaf node
+            self.insert_into_leaf(node, &key, &value)
+        } else {
+            // internal node
+            let pos = node.keys.binary_search(&key).unwrap_or_else(|pos| pos);
+            let child_offset = node.children[pos];
+            let mut child_node = self.disk_manager.load_node_from_disk(child_offset).unwrap();
+            let result = self.insert_recursive(&mut child_node, key, value);
+
+            match result.splits {
+                None => {
+                    let new_child_offset = result.new_offset;
+                    node.children[pos] = new_child_offset;
+
+                    let new_internal_offset = self.disk_manager.get_new_offset().unwrap();
+                    self.disk_manager.append_node_to_disk(new_internal_offset, &node);
+
+                    InsertResult {
+                        new_offset: new_internal_offset,
+                        splits: None
+                    }
+                }
+                Some(splits) => {
+                    panic!("internal node split handler not yet handled")
+                }
+            }
+        }
+    }
+
+    fn insert_into_leaf(&mut self, node: &mut Node, key: &Vec<u8>, value: &Vec<u8>) -> InsertResult {
         let pos = node.keys.binary_search(&key).unwrap_or_else(|pos| pos);
-        node.keys.insert(pos, key);
-        node.values.insert(pos, value);
+        node.keys.insert(pos, key.clone());
+        node.values.insert(pos, value.clone());
 
         let new_offset = self.disk_manager.get_new_offset().unwrap();
         match self.disk_manager.append_node_to_disk(new_offset, node) {
@@ -212,6 +247,35 @@ mod test {
         assert_eq!(left_node.keys, vec![b"alpha".to_vec()]);
         assert_eq!(left_node.values.len(), 1);
         assert_eq!(left_node.values, vec![b"1".to_vec()]);
+
+        assert_eq!(right_node.keys.len(), 2);
+        assert_eq!(right_node.keys, vec![b"beta".to_vec(), b"charlie".to_vec()]);
+        assert_eq!(right_node.values.len(), 2);
+        assert_eq!(right_node.values, vec![b"1".to_vec(), b"1".to_vec()]);
+    }
+
+    #[test]
+    fn test_insert_into_leaf_node_with_internal_node() {
+        let mut btree = get_temp_btree_new_configs();
+        btree.insert(b"charlie".to_vec(), b"1".to_vec());
+        btree.insert(b"alpha".to_vec(), b"1".to_vec());
+        btree.insert(b"beta".to_vec(), b"1".to_vec());
+        btree.insert(b"a".to_vec(), b"1".to_vec());
+
+        let root = btree.disk_manager.load_node_from_disk(btree.root_offset).unwrap();
+        assert_eq!(root.keys.len(), 1);
+        assert_eq!(root.keys[0], b"beta");
+
+        assert_eq!(root.children.len(), 2);
+        let left_offset = root.children[0];
+        let right_offset = root.children[1];
+        let left_node = btree.disk_manager.load_node_from_disk(left_offset).unwrap();
+        let right_node = btree.disk_manager.load_node_from_disk(right_offset).unwrap();
+
+        assert_eq!(left_node.keys.len(), 2);
+        assert_eq!(left_node.keys, vec![b"a".to_vec(), b"alpha".to_vec()]);
+        assert_eq!(left_node.values.len(), 2);
+        assert_eq!(left_node.values, vec![b"1".to_vec(), b"1".to_vec()]);
 
         assert_eq!(right_node.keys.len(), 2);
         assert_eq!(right_node.keys, vec![b"beta".to_vec(), b"charlie".to_vec()]);
