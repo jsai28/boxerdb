@@ -98,8 +98,6 @@ impl BTree {
                     self.disk_manager.append_node_to_disk(new_offset, &new_internal_node);
                     node.children[pos] = new_offset;
 
-                    let load_internal_node_again = self.disk_manager.load_node_from_disk(new_offset).unwrap();
-
                     let new_internal_offset = self.disk_manager.get_new_offset().unwrap();
                     self.disk_manager.append_node_to_disk(new_internal_offset, &node);
 
