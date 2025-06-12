@@ -81,7 +81,32 @@ impl BTree {
                     }
                 }
                 Some(splits) => {
-                    panic!("internal node split handler not yet handled")
+                    // create new internal node
+                    // set child pointer to this new internal node
+                    // return
+                    let promoted_key = splits.promoted_key;
+                    let left_child_offset = splits.left_offset;
+                    let right_child_offset = splits.right_offset;
+
+                    let new_internal_node = Node {
+                        keys: vec![promoted_key],
+                        children: vec![left_child_offset, right_child_offset],
+                        values: vec![]
+                    };
+
+                    let new_offset = self.disk_manager.get_new_offset().unwrap();
+                    self.disk_manager.append_node_to_disk(new_offset, &new_internal_node);
+                    node.children[pos] = new_offset;
+
+                    let load_internal_node_again = self.disk_manager.load_node_from_disk(new_offset).unwrap();
+
+                    let new_internal_offset = self.disk_manager.get_new_offset().unwrap();
+                    self.disk_manager.append_node_to_disk(new_internal_offset, &node);
+
+                    InsertResult {
+                        new_offset: new_internal_offset,
+                        splits: None
+                    }
                 }
             }
         }
@@ -276,6 +301,35 @@ mod test {
         assert_eq!(left_node.keys, vec![b"a".to_vec(), b"alpha".to_vec()]);
         assert_eq!(left_node.values.len(), 2);
         assert_eq!(left_node.values, vec![b"1".to_vec(), b"1".to_vec()]);
+
+        assert_eq!(right_node.keys.len(), 2);
+        assert_eq!(right_node.keys, vec![b"beta".to_vec(), b"charlie".to_vec()]);
+        assert_eq!(right_node.values.len(), 2);
+        assert_eq!(right_node.values, vec![b"1".to_vec(), b"1".to_vec()]);
+    }
+
+    #[test]
+    fn test_insert_into_leaf_node_with_internal_node_2() {
+        let mut btree = get_temp_btree_new_configs();
+        btree.insert(b"charlie".to_vec(), b"1".to_vec());
+        btree.insert(b"alpha".to_vec(), b"1".to_vec());
+        btree.insert(b"beta".to_vec(), b"1".to_vec());
+        btree.insert(b"abcd".to_vec(), b"1".to_vec());
+        btree.insert(b"abcdefg".to_vec(), b"1".to_vec());
+
+        let root = btree.disk_manager.load_node_from_disk(btree.root_offset).unwrap();
+        assert_eq!(root.keys.len(), 1);
+        assert_eq!(root.keys[0], b"beta");
+
+        assert_eq!(root.children.len(), 2);
+        let left_offset = root.children[0];
+        let right_offset = root.children[1];
+        let left_node = btree.disk_manager.load_node_from_disk(left_offset).unwrap();
+        let right_node = btree.disk_manager.load_node_from_disk(right_offset).unwrap();
+
+        assert_eq!(left_node.keys.len(), 1);
+        assert_eq!(left_node.keys, vec![b"abcdefg".to_vec()]);
+        assert_eq!(left_node.children.len(), 2);
 
         assert_eq!(right_node.keys.len(), 2);
         assert_eq!(right_node.keys, vec![b"beta".to_vec(), b"charlie".to_vec()]);
