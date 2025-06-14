@@ -10,7 +10,7 @@ pub struct BTree {
 }
 
 struct InsertResult {
-    new_offset: u64,
+    new_offset: Option<u64>,
     splits: Option<InsertSplit>
 }
 
@@ -44,7 +44,7 @@ impl BTree {
         match result.splits {
             None => {
                 // commit transaction by changing root pointer to new root offset
-                self.root_offset = result.new_offset;
+                self.root_offset = result.new_offset.unwrap();
                 self.disk_manager.write_metadata(self.root_offset).unwrap();
                 self.root = self.disk_manager.load_node_from_disk(self.root_offset).unwrap();
             }
@@ -81,13 +81,13 @@ impl BTree {
             match result.splits {
                 None => {
                     let new_child_offset = result.new_offset;
-                    node.children[pos] = new_child_offset;
+                    node.children[pos] = new_child_offset.unwrap();
 
                     let new_internal_offset = self.disk_manager.get_new_offset().unwrap();
                     self.disk_manager.append_node_to_disk(new_internal_offset, &node);
 
                     InsertResult {
-                        new_offset: new_internal_offset,
+                        new_offset: Some(new_internal_offset),
                         splits: None
                     }
                 }
@@ -108,7 +108,7 @@ impl BTree {
                     match self.disk_manager.append_node_to_disk(new_offset, &node) {
                         EncodeResult::Encoded => {
                             InsertResult {
-                                new_offset,
+                                new_offset: Some(new_offset),
                                 splits: None
                             }
                         }
@@ -122,15 +122,22 @@ impl BTree {
     }
 
     fn insert_into_leaf(&mut self, node: &mut Node, key: &Vec<u8>, value: &Vec<u8>) -> InsertResult {
-        let pos = node.keys.binary_search(&key).unwrap_or_else(|pos| pos);
-        node.keys.insert(pos, key.clone());
-        node.values.insert(pos, value.clone());
+        match node.keys.binary_search(&key) {
+            Ok(pos) => {
+                // key already exists, update value
+                node.values[pos] = value.clone();
+            }
+            Err(pos) => {
+                node.keys.insert(pos, key.clone());
+                node.values.insert(pos, value.clone());
+            }
+        }
 
         let new_offset = self.disk_manager.get_new_offset().unwrap();
         match self.disk_manager.append_node_to_disk(new_offset, node) {
             EncodeResult::Encoded => {
                 InsertResult {
-                    new_offset,
+                    new_offset: Some(new_offset),
                     splits: None
                 }
             }
@@ -170,7 +177,7 @@ impl BTree {
         };
 
         InsertResult {
-            new_offset: 0,
+            new_offset: None,
             splits: Some(splits)
         }
     }
@@ -203,7 +210,7 @@ impl BTree {
         };
 
         InsertResult {
-            new_offset: 0,
+            new_offset: None,
             splits: Some(split)
         }
     }
@@ -343,5 +350,17 @@ mod test {
         assert_eq!(right_node.keys, vec![b"beta".to_vec(), b"charlie".to_vec()]);
         assert_eq!(right_node.values.len(), 2);
         assert_eq!(right_node.values, vec![b"1".to_vec(), b"1".to_vec()]);
+    }
+
+    #[test]
+    fn test_duplicate_key_inserts() {
+        let mut btree = get_temp_btree();
+        btree.insert(b"a".to_vec(), b"1".to_vec());
+        btree.insert(b"a".to_vec(), b"2".to_vec());
+
+        let root = btree.disk_manager.load_node_from_disk(btree.root_offset).unwrap();
+        assert_eq!(root.keys.len(), 1);
+        assert_eq!(root.keys[0], b"a".to_vec());
+        assert_eq!(root.values[0], b"2".to_vec());
     }
 }
