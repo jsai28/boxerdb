@@ -9,6 +9,7 @@ pub struct StorageConfig {
     pub max_val_size: u16,
     pub metadata_offset: u64,
     pub first_page_offset: u64,
+    pub min_node_size: u16
 }
 
 impl Default for StorageConfig {
@@ -18,7 +19,8 @@ impl Default for StorageConfig {
             max_key_size: 1000,
             max_val_size: 3000,
             metadata_offset: 0,
-            first_page_offset: 4096 // should match page_size
+            first_page_offset: 4096, // should match page_size
+            min_node_size: 4096/4
         }
     }
 }

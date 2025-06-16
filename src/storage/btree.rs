@@ -20,6 +20,16 @@ struct InsertSplit {
     right_offset: u64,
 }
 
+struct DeleteResult {
+    new_offset: Option<u64>,
+    merges: Option<DeleteMerge>
+}
+
+struct DeleteMerge {
+    left_offset: u64,
+    right_offset: u64,
+}
+
 impl BTree {
     pub fn new(path: &str, storage_config: Option<StorageConfig>) -> std::io::Result<Self> {
         let storage_config = storage_config.unwrap_or_default();
@@ -214,6 +224,55 @@ impl BTree {
             splits: Some(split)
         }
     }
+
+    pub fn delete(&mut self, key: Vec<u8>) {
+        // modify clone of root so delete is durable
+        let mut root_clone = self.root.clone();
+        let result = self.delete_recursive(&mut root_clone, &key);
+
+        self.root_offset = result.new_offset.unwrap();
+        self.disk_manager.write_metadata(self.root_offset).unwrap();
+        self.root = self.disk_manager.load_node_from_disk(self.root_offset).unwrap();
+    }
+
+    fn delete_recursive(&mut self, node: &mut Node, key: &Vec<u8>) -> DeleteResult {
+        if node.children.len() == 0 {
+            // leaf node
+            match node.keys.binary_search(&key) {
+                Ok(pos) => {
+                    node.keys.remove(pos);
+                    node.values.remove(pos);
+                }
+                Err(_) => {
+                    // doesn't exist in node
+                    // do nothing
+                    DeleteResult {
+                        new_offset: None,
+                        merges: None
+                    };
+                }
+            }
+
+            let new_offset = self.disk_manager.get_new_offset().unwrap();
+            match self.disk_manager.append_node_to_disk(new_offset, &node) {
+                EncodeResult::Encoded => {
+                    // delete successful
+                    DeleteResult {
+                        new_offset: Some(new_offset),
+                        merges: None
+                    }
+                }
+                EncodeResult::NeedSplit => {
+                    panic!("implement this")
+                },
+            }
+        } else {
+            let pos = node.keys.binary_search(&key).unwrap_or_else(|pos| pos);
+            let child_offset = node.children[pos];
+            let mut child_node = self.disk_manager.load_node_from_disk(child_offset).unwrap();
+            self.delete_recursive(&mut child_node, &key)
+        }
+    }
 }
 
 #[cfg(test)]
@@ -237,6 +296,7 @@ mod test {
             max_val_size: 16,
             metadata_offset: 0,
             first_page_offset: 32,
+            min_node_size: 8
         };
 
         BTree::new(tmp.path().to_str().unwrap(), Some(storage_config)).unwrap()
@@ -362,5 +422,19 @@ mod test {
         assert_eq!(root.keys.len(), 1);
         assert_eq!(root.keys[0], b"a".to_vec());
         assert_eq!(root.values[0], b"2".to_vec());
+    }
+
+    #[test]
+    fn test_simple_delete_key() {
+        let mut btree = get_temp_btree_new_configs();
+        btree.insert(b"a".to_vec(), b"1".to_vec());
+        btree.insert(b"b".to_vec(), b"1".to_vec());
+        btree.insert(b"c".to_vec(), b"1".to_vec());
+
+        btree.delete(b"c".to_vec());
+        let root = btree.disk_manager.load_node_from_disk(btree.root_offset).unwrap();
+        assert_eq!(root.keys.len(), 2);
+        assert_eq!(root.keys[0], b"a");
+        assert_eq!(root.keys[1], b"b");
     }
 }
