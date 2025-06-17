@@ -1,14 +1,8 @@
 use crate::storage::configs::{StorageConfig};
-use crate::storage::node::{Node};
+use crate::storage::node::{Node, EncodeResult};
 use std::fs::{File, OpenOptions};
 use std::io::{ErrorKind, Read, Result, Seek, SeekFrom, Write};
 use std::path::Path;
-
-#[derive(Debug)]
-pub enum EncodeResult {
-    Encoded,
-    NeedSplit,
-}
 
 /// All functions related to reading and writing from disk
 pub struct DiskManager {
@@ -87,13 +81,13 @@ impl DiskManager {
     /// Write the node from memory to disk
     pub fn append_node_to_disk(&mut self, offset: u64, node: &Node) -> EncodeResult {
         match Node::encode_node(node, self.config.clone()) {
-            Some(encoded) => {
+            EncodeResult::Encoded { buffer: encoded, used } => {
                 self.file.seek(SeekFrom::Start(offset)).unwrap();
                 self.file.write_all(&encoded).unwrap();
                 self.file.sync_all().unwrap();
-                EncodeResult::Encoded
+                EncodeResult::Encoded { buffer: encoded, used }
             }
-            None => {
+            EncodeResult::NeedSplit => {
                 EncodeResult::NeedSplit
             }
         }

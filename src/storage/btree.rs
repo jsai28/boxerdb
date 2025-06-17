@@ -1,6 +1,9 @@
-use crate::storage::node::Node;
-use crate::storage::diskmanager::{DiskManager, EncodeResult};
+use crate::storage::node::{Node, EncodeResult};
+use crate::storage::diskmanager::{DiskManager};
 use crate::storage::configs::{StorageConfig};
+
+const NEED_MERGE_ERR_MSG: &str = "Inserting a node resulted in a merge.";
+const NEED_SPLIT_ERR_MSG: &str = "Deleting a node resulted in a split.";
 
 pub struct BTree {
     pub root: Node,
@@ -116,7 +119,7 @@ impl BTree {
 
                     let new_offset = self.disk_manager.get_new_offset().unwrap();
                     match self.disk_manager.append_node_to_disk(new_offset, &node) {
-                        EncodeResult::Encoded => {
+                        EncodeResult::Encoded { buffer: _, used: _ } => {
                             InsertResult {
                                 new_offset: Some(new_offset),
                                 splits: None
@@ -145,7 +148,7 @@ impl BTree {
 
         let new_offset = self.disk_manager.get_new_offset().unwrap();
         match self.disk_manager.append_node_to_disk(new_offset, node) {
-            EncodeResult::Encoded => {
+            EncodeResult::Encoded { buffer: _, used: _ } => {
                 InsertResult {
                     new_offset: Some(new_offset),
                     splits: None
@@ -255,15 +258,19 @@ impl BTree {
 
             let new_offset = self.disk_manager.get_new_offset().unwrap();
             match self.disk_manager.append_node_to_disk(new_offset, &node) {
-                EncodeResult::Encoded => {
+                EncodeResult::Encoded { buffer: _, used } => {
                     // delete successful
+                    // check if encoded meets the minimum size
+                    if used < self.storage_config.min_node_size as usize {
+                        panic!{"Node is now too small, need to merge."}
+                    }
                     DeleteResult {
                         new_offset: Some(new_offset),
                         merges: None
                     }
                 }
                 EncodeResult::NeedSplit => {
-                    panic!("implement this")
+                    panic!("{}", NEED_SPLIT_ERR_MSG)
                 },
             }
         } else {
@@ -431,10 +438,10 @@ mod test {
         btree.insert(b"b".to_vec(), b"1".to_vec());
         btree.insert(b"c".to_vec(), b"1".to_vec());
 
-        btree.delete(b"c".to_vec());
+        btree.delete(b"b".to_vec());
         let root = btree.disk_manager.load_node_from_disk(btree.root_offset).unwrap();
         assert_eq!(root.keys.len(), 2);
         assert_eq!(root.keys[0], b"a");
-        assert_eq!(root.keys[1], b"b");
+        assert_eq!(root.keys[1], b"c");
     }
 }
