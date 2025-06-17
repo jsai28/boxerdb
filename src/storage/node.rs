@@ -7,20 +7,17 @@ pub struct Node {
     pub values: Vec<Vec<u8>>,
 }
 
-#[derive(Debug)]
-pub enum EncodeResult {
-    Encoded {
-        buffer: Vec<u8>,
-        used: usize,
-    },
-    NeedSplit
+#[derive(Clone, PartialEq, Debug)]
+pub struct EncoderResult {
+    pub buffer: Option<Vec<u8>>,
+    pub used: usize,
 }
 
 impl Node {
     /// Encode the keys, values, and children of a node + metadata
     /// Node = node_type (u8) + num_of_keys (u16) + pointers (u64) + offsets (u16) + KV pairs (4000 bytes) + unused space
     /// KV pairs = key_len (u16) + val_len (u16) + key bytes + val bytes
-    pub fn encode_node(node: &Node, storage_config: StorageConfig) -> EncodeResult {
+    pub fn encode_node(node: &Node, storage_config: StorageConfig) -> EncoderResult {
         let mut buf = vec![0u8; storage_config.page_size as usize];
         let mut node_type = BNODE_LEAF;
         if !node.children.is_empty() {
@@ -63,7 +60,10 @@ impl Node {
 
             let needed_space = 2+2+key.len()+val.len(); // 2 bytes for each length
             if cursor + needed_space > buf.len() {
-                return EncodeResult::NeedSplit;
+                return EncoderResult {
+                    buffer: None,
+                    used: 0
+                };
             }
 
             buf[cursor..cursor + 2].copy_from_slice(&key_len.to_le_bytes());
@@ -79,7 +79,7 @@ impl Node {
             cursor += val_len as usize;
         }
 
-        EncodeResult::Encoded { buffer: buf, used: cursor }
+        EncoderResult { buffer: Some(buf), used: cursor }
     }
 
     pub fn decode_node(buf: Vec<u8>) -> Node {
@@ -163,31 +163,22 @@ mod test {
 
         let encoded = Node::encode_node(&node, StorageConfig::default());
 
-        match encoded {
-            EncodeResult::Encoded { buffer, used } => {
-                let decoded = Node::decode_node(buffer);
-                assert_eq!(node.keys, decoded.keys);
-                assert_eq!(node.values, decoded.values);
-                assert_eq!(node.children, decoded.children);
-            }
-            other => panic!("Expected Encoded, got {:?}", other),
-        }
+        let buffer = encoded.buffer.unwrap();
+        let decoded = Node::decode_node(buffer);
+        assert_eq!(node.keys, decoded.keys);
+        assert_eq!(node.values, decoded.values);
+        assert_eq!(node.children, decoded.children);
     }
 
     #[test]
     fn test_encode_decode_roundtrip_2() {
         let node = create_sample_node();
         let encoded = Node::encode_node(&node, StorageConfig::default());
-
-        match encoded {
-            EncodeResult::Encoded { buffer , used} => {
-                let decoded = Node::decode_node(buffer);
-                assert_eq!(node.keys, decoded.keys);
-                assert_eq!(node.values, decoded.values);
-                assert_eq!(node.children, decoded.children);
-            }
-            other => panic!("Expected Encoded, got {:?}", other),
-        }
+        let buffer = encoded.buffer.unwrap();
+        let decoded = Node::decode_node(buffer);
+        assert_eq!(node.keys, decoded.keys);
+        assert_eq!(node.values, decoded.values);
+        assert_eq!(node.children, decoded.children);
     }
 
     #[test]
@@ -199,15 +190,11 @@ mod test {
         };
 
         let encoded = Node::encode_node(&node, StorageConfig::default());
+        let buffer = encoded.buffer.unwrap();
 
-        match encoded {
-            EncodeResult::Encoded { buffer, used } => {
-                let decoded = Node::decode_node(buffer);
-                assert_eq!(node.keys, decoded.keys);
-                assert_eq!(node.values, decoded.values);
-                assert_eq!(node.children, decoded.children);
-            }
-            other => panic!("Expected Encoded, got {:?}", other),
-        }
+        let decoded = Node::decode_node(buffer);
+        assert_eq!(node.keys, decoded.keys);
+        assert_eq!(node.values, decoded.values);
+        assert_eq!(node.children, decoded.children);
     }
 }

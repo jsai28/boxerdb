@@ -20,7 +20,7 @@ impl Default for StorageConfig {
             max_val_size: 3000,
             metadata_offset: 0,
             first_page_offset: 4096, // should match page_size
-            min_node_size: 4096/4
+            min_node_size: 1024 // 4096 divide by 4
         }
     }
 }

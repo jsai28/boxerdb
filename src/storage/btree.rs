@@ -1,9 +1,6 @@
-use crate::storage::node::{Node, EncodeResult};
-use crate::storage::diskmanager::{DiskManager};
+use crate::storage::node::{Node};
+use crate::storage::diskmanager::{DiskManager, AppendResult};
 use crate::storage::configs::{StorageConfig};
-
-const NEED_MERGE_ERR_MSG: &str = "Inserting a node resulted in a merge.";
-const NEED_SPLIT_ERR_MSG: &str = "Deleting a node resulted in a split.";
 
 pub struct BTree {
     pub root: Node,
@@ -119,13 +116,13 @@ impl BTree {
 
                     let new_offset = self.disk_manager.get_new_offset().unwrap();
                     match self.disk_manager.append_node_to_disk(new_offset, &node) {
-                        EncodeResult::Encoded { buffer: _, used: _ } => {
+                        AppendResult::Encoded { used_space: _ } => {
                             InsertResult {
                                 new_offset: Some(new_offset),
                                 splits: None
                             }
                         }
-                        EncodeResult::NeedSplit => {
+                        AppendResult::NeedSplit => {
                             self.propagate_internal_split(node, new_offset)
                         }
                     }
@@ -148,13 +145,13 @@ impl BTree {
 
         let new_offset = self.disk_manager.get_new_offset().unwrap();
         match self.disk_manager.append_node_to_disk(new_offset, node) {
-            EncodeResult::Encoded { buffer: _, used: _ } => {
+            AppendResult::Encoded { used_space: _ } => {
                 InsertResult {
                     new_offset: Some(new_offset),
                     splits: None
                 }
             }
-            EncodeResult::NeedSplit => {
+            AppendResult::NeedSplit => {
                 self.propagate_leaf_split(node, new_offset)
             }
         }
@@ -258,20 +255,18 @@ impl BTree {
 
             let new_offset = self.disk_manager.get_new_offset().unwrap();
             match self.disk_manager.append_node_to_disk(new_offset, &node) {
-                EncodeResult::Encoded { buffer: _, used } => {
+                AppendResult::Encoded { used_space } => {
                     // delete successful
                     // check if encoded meets the minimum size
-                    if used < self.storage_config.min_node_size as usize {
-                        panic!{"Node is now too small, need to merge."}
+                    if used_space < self.storage_config.min_node_size as usize {
+                        panic!("Need 2 merge");
                     }
                     DeleteResult {
                         new_offset: Some(new_offset),
                         merges: None
                     }
                 }
-                EncodeResult::NeedSplit => {
-                    panic!("{}", NEED_SPLIT_ERR_MSG)
-                },
+                _ => panic!("Delete failed!")
             }
         } else {
             let pos = node.keys.binary_search(&key).unwrap_or_else(|pos| pos);
@@ -288,8 +283,13 @@ mod test {
     use tempfile::NamedTempFile;
 
     fn get_temp_btree() -> BTree {
-        let tmp = NamedTempFile::new().unwrap();
-        BTree::new(tmp.path().to_str().unwrap(), None).unwrap()
+        let tmp = tempfile::NamedTempFile::new().expect("Failed to create temp file");
+
+        let path_str = tmp.path().to_str().expect("Temp path is not UTF-8");
+        println!("Temp file path: {}", path_str);
+
+        let btree = BTree::new(path_str, None).expect("Failed to create BTree");
+        btree
     }
 
     fn get_temp_btree_new_configs() -> BTree {
