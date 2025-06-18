@@ -252,21 +252,22 @@ impl BTree {
                     };
                 }
             }
-
-            let new_offset = self.disk_manager.get_new_offset().unwrap();
-            match self.disk_manager.append_node_to_disk(new_offset, &node) {
-                AppendResult::Encoded { used_space } => {
-                    // delete successful
-                    // check if encoded meets the minimum size
-                    if used_space < self.storage_config.min_node_size as usize {
-                        panic!("Need 2 merge");
+            // check if encoded meets the minimum size
+            let needs_merge = self.disk_manager.check_node_needs_merge(node);
+            if !needs_merge {
+                let new_offset = self.disk_manager.get_new_offset().unwrap();
+                match self.disk_manager.append_node_to_disk(new_offset, &node) {
+                    AppendResult::Encoded { used_space } => {
+                        // delete successful
+                        DeleteResult {
+                            new_offset: Some(new_offset),
+                            merges: None
+                        }
                     }
-                    DeleteResult {
-                        new_offset: Some(new_offset),
-                        merges: None
-                    }
+                    _ => panic!("Delete failed!")
                 }
-                _ => panic!("Delete failed!")
+            } else {
+                panic!("needs merge!");
             }
         } else {
             let pos = node.keys.binary_search(&key).unwrap_or_else(|pos| pos);

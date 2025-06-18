@@ -41,6 +41,7 @@ impl DiskManager {
             // write root_offset to metadata block
             disk_manager.write_metadata(disk_manager.config.first_page_offset)?;
 
+            // write empty root to root_offset
             let root = Node {
                 keys: vec![],
                 values: vec![],
@@ -100,6 +101,15 @@ impl DiskManager {
                 AppendResult::NeedSplit
             }
         }
+    }
+
+    /// Check if encoding meets minimum size after delete operation
+    pub fn check_node_needs_merge(&mut self, node: &Node) -> bool {
+        let encoder_result = Node::encode_node(node, self.config.clone());
+        if encoder_result.used < self.config.min_node_size as usize {
+            return true
+        };
+        false
     }
 
     /// Get a new offset
