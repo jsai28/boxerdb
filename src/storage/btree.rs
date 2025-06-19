@@ -116,7 +116,7 @@ impl BTree {
 
                     let new_offset = self.disk_manager.get_new_offset().unwrap();
                     match self.disk_manager.append_node_to_disk(new_offset, &node) {
-                        AppendResult::Encoded { used_space: _ } => {
+                        AppendResult::Encoded => {
                             InsertResult {
                                 new_offset: Some(new_offset),
                                 splits: None
@@ -145,7 +145,7 @@ impl BTree {
 
         let new_offset = self.disk_manager.get_new_offset().unwrap();
         match self.disk_manager.append_node_to_disk(new_offset, node) {
-            AppendResult::Encoded { used_space: _ } => {
+            AppendResult::Encoded => {
                 InsertResult {
                     new_offset: Some(new_offset),
                     splits: None
@@ -257,11 +257,11 @@ impl BTree {
             if !needs_merge {
                 let new_offset = self.disk_manager.get_new_offset().unwrap();
                 match self.disk_manager.append_node_to_disk(new_offset, &node) {
-                    AppendResult::Encoded { used_space } => {
+                    AppendResult::Encoded => {
                         // delete successful
                         DeleteResult {
                             new_offset: Some(new_offset),
-                            merges: None
+                            merge: false
                         }
                     }
                     _ => panic!("Delete failed!")
