@@ -6,9 +6,7 @@ use std::path::Path;
 
 #[derive(Debug)]
 pub enum AppendResult {
-    Encoded {
-        used_space: usize
-    },
+    Encoded,
     NeedSplit,
 }
 
@@ -95,7 +93,7 @@ impl DiskManager {
                 self.file.seek(SeekFrom::Start(offset)).unwrap();
                 self.file.write_all(&buffer).unwrap();
                 self.file.sync_all().unwrap();
-                AppendResult::Encoded { used_space: encoder_result.used }
+                AppendResult::Encoded
             }
             None => {
                 AppendResult::NeedSplit
