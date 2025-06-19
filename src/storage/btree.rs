@@ -261,7 +261,7 @@ impl BTree {
                         // delete successful
                         DeleteResult {
                             new_offset: Some(new_offset),
-                            merge: false
+                            merges: None
                         }
                     }
                     _ => panic!("Delete failed!")
