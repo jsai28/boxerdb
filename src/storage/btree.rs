@@ -253,8 +253,8 @@ impl BTree {
                 }
             }
             // check if encoded meets the minimum size
-            let needs_merge = self.disk_manager.check_node_needs_merge(node);
-            if !needs_merge {
+            let should_merge = self.disk_manager.should_merge(node);
+            if !should_merge {
                 let new_offset = self.disk_manager.get_new_offset().unwrap();
                 match self.disk_manager.append_node_to_disk(new_offset, &node) {
                     AppendResult::Encoded => {

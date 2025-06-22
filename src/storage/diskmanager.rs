@@ -102,7 +102,7 @@ impl DiskManager {
     }
 
     /// Check if encoding meets minimum size after delete operation
-    pub fn check_node_needs_merge(&mut self, node: &Node) -> bool {
+    pub fn should_merge(&mut self, node: &Node) -> bool {
         let encoder_result = Node::encode_node(node, self.config.clone());
         if encoder_result.used < self.config.min_node_size as usize {
             return true
