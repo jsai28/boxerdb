@@ -243,7 +243,7 @@ impl BTree {
                     // do nothing
                     DeleteResult {
                         new_offset: None,
-                        merges: None
+                        should_merge: false
                     };
                 }
             }
