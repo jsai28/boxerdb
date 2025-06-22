@@ -22,12 +22,7 @@ struct InsertSplit {
 
 struct DeleteResult {
     new_offset: Option<u64>,
-    merges: Option<DeleteMerge>
-}
-
-struct DeleteMerge {
-    left_offset: u64,
-    right_offset: u64,
+    should_merge: bool
 }
 
 impl BTree {
@@ -261,19 +256,29 @@ impl BTree {
                         // delete successful
                         DeleteResult {
                             new_offset: Some(new_offset),
-                            merges: None
+                            should_merge: false
                         }
                     }
                     _ => panic!("Delete failed!")
                 }
             } else {
-                panic!("needs merge!");
+                // need to merge this node into sibling or parent
+                DeleteResult {
+                    new_offset: None,
+                    should_merge: true
+                }
             }
         } else {
             let pos = node.keys.binary_search(&key).unwrap_or_else(|pos| pos);
             let child_offset = node.children[pos];
             let mut child_node = self.disk_manager.load_node_from_disk(child_offset).unwrap();
-            self.delete_recursive(&mut child_node, &key)
+            let delete_result = self.delete_recursive(&mut child_node, &key);
+
+            if delete_result.should_merge {
+                panic!("should merge")
+            } else {
+                delete_result
+            }
         }
     }
 }
