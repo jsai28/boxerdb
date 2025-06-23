@@ -241,10 +241,10 @@ impl BTree {
                 Err(_) => {
                     // doesn't exist in node
                     // do nothing
-                    DeleteResult {
+                    return DeleteResult {
                         new_offset: None,
                         should_merge: false
-                    };
+                    }
                 }
             }
             // check if encoded meets the minimum size
@@ -273,12 +273,48 @@ impl BTree {
             let child_offset = node.children[pos];
             let mut child_node = self.disk_manager.load_node_from_disk(child_offset).unwrap();
             let delete_result = self.delete_recursive(&mut child_node, &key);
+            let new_offset = self.disk_manager.get_new_offset().unwrap();
 
             if delete_result.should_merge {
-                panic!("should merge")
+                // check for siblings to merge with
+                if node.children.len() > 1 {
+                    if pos > 0 {
+                        // merge with left sibling
+                        let mut left_node = self.disk_manager.load_node_from_disk(node.children[pos - 1]).unwrap();
+                        self.merge_nodes(&mut left_node, &mut child_node);
+
+                        self.disk_manager.append_node_to_disk(new_offset,&left_node);
+                    } else {
+                        // merge with right sibling
+                        let mut right_node = self.disk_manager.load_node_from_disk(node.children[pos + 1]).unwrap();
+                        self.merge_nodes(&mut child_node, &mut right_node);
+
+                        self.disk_manager.append_node_to_disk(new_offset, &child_node);
+                    }
+                } else {
+                    // merge with current node
+                    self.merge_nodes(node, &mut child_node);
+                    self.disk_manager.append_node_to_disk(new_offset,node);
+                }
+
+                DeleteResult {
+                    new_offset: Some(new_offset),
+                    should_merge: false
+                }
             } else {
                 delete_result
             }
+        }
+    }
+
+    fn merge_nodes(&mut self, left: &mut Node, right: &mut Node) {
+        left.keys.extend(right.keys.clone());
+        if left.values.len() > 0 {
+            // leaf node
+            left.values.extend(right.values.clone());
+        } else {
+            // internal node
+            left.children.extend(right.children.clone());
         }
     }
 }
