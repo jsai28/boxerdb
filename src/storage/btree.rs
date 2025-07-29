@@ -284,12 +284,20 @@ impl BTree {
                         self.merge_nodes(&mut left_node, &mut child_node);
 
                         self.disk_manager.append_node_to_disk(new_offset,&left_node);
+
+                        node.keys.remove(pos-1);
+                        node.children[pos] = new_offset;
+                        node.children.remove(pos);
                     } else {
                         // merge with right sibling
                         let mut right_node = self.disk_manager.load_node_from_disk(node.children[pos + 1]).unwrap();
                         self.merge_nodes(&mut child_node, &mut right_node);
 
                         self.disk_manager.append_node_to_disk(new_offset, &child_node);
+
+                        node.keys.remove(pos);
+                        node.children[pos] = new_offset;
+                        node.children.remove(pos+1);
                     }
                 } else {
                     // merge with current node
